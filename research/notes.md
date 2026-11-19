@@ -85,5 +85,29 @@ With GET and QUERY routes on `/accounts`, a `DELETE /accounts` returns 405 with 
 
 FastAPI includes the rejected value in the error response by default. Here it’s null is harmless. But if a client sends a mistyped sensitive value, such as a malformed IBAN or a token in the wrong field, it gets reflected in the response body. If something logs response bodies (some gateways and debugging middleware do), it also ends up in a log.
 
+## Authentication & Authorisation
+
+**Authentication vs Authorisation**
+
+|  | What is asks | Failure status 
+|---|---|---|
+Authentication | _Who are you?_ | **401 Unauthorised** (unauthenticated)
+Authorisation | _Are you allowed to do this?_ | **403 Forbidden** providing information leakage (or 404 which reveals nothing)
+
+Both separate checks and most API vulnerabilities lie in the **second** one.
+
+**Object-level authorisation**
+Authorisation happens at two levels:
+- **Functional:** checks whether a user can use a specific endpoint at all.
+- **Object:** checks whether a user can access _a particular record._ 
+
+**BOLA (Broken Object Level Authorisation):** the failure of the second check: the user is properly logged in and allowed to use the endpoint, but the server doesn’t verify that the requested object belongs to them. Changing an ID in the request (`acc-001 → acc-003`) returns someone else’s data. **It’s #1 in the OWASP API Security Top 10 (API1:2023).**
+
+**"Safe" methods**
+RFC 9110 defines **safe** as “doesn’t change server state”, and RFC 10008 makes QUERY safe and idempotent.
+- **Safe describes side effects, not sensitivity** e.g. A read that returns Bob’s IBAN to Alice changes nothing on the server, yet it’s a data breach.
+- BOLA is overwhelmingly a **read** vulnerability: viewing other users’ records.
+- So QUERY needs exactly the same authorisation as GET.
+
 ### Open items
 1. Test whether 405 is returned before authentication (Stage 4)
