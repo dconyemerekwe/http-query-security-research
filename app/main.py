@@ -15,10 +15,14 @@ app = FastAPI()
 def show_health():
     return {"status": "ok"}
 
+@app.api_route("/accounts", methods=["QUERY"])
+def query_accounts(f: AccountFilter):
+    return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)
+
 @app.get("/accounts")
 def get_accounts(f: Annotated[AccountFilter, Query()]): # Annotated[Type, metadata -> coming from: URL's query string]
     return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)
 
 @app.post("/accounts/search")
-def find_accounts(f: AccountFilter):
+def post_accounts(f: AccountFilter):
     return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)
