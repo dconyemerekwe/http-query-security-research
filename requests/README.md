@@ -19,15 +19,15 @@ Reminders:
 
 ## The files
 
-| File | Tests | Result |
-|---|---|---|
-| `filter-u002-current.json` | two filters (AND) | `acc-003`, `acc-005` |
-| `filter-u001.json` | one filter | `acc-001`, `acc-002` |
-| `filter-min-balance-1m.json` | balance ≥ 1,000,000 | `acc-004` |
-| `filter-empty.json` | no filters | all 5 |
-| `filter-invalid-balance.json` | `"abc"` for a number | 422 Unprocessable Content |
-| `filter-string-number.json` | `"1000000"` as a string | converted or rejected? |
-| `filter-unknown-field.json` | extra `is_admin` field | Ignored (200 OK) |
+| File | Tests | Result (POST) | Result (QUERY)
+|---|---|---|---|
+| `filter-u002-current.json` | Two filters (AND) | `acc-003`, `acc-005` | `acc-003`, `acc-005`
+| `filter-u001.json` | One filter | `acc-001`, `acc-002` | `acc-001`, `acc-002`
+| `filter-min-balance-1m.json` | Balance ≥ 1,000,000 | `acc-004` | `acc-004`
+| `filter-empty.json` | No filters | All 5 | All 5
+| `filter-invalid-balance.json` | `"abc"` for a number | Rejects and `msg` field returns `"unable to parse string as an integer"` (422) | Rejects and `msg` field returns `"unable to parse string as an integer"` (422)
+| `filter-string-number.json` | `"1000000"` as a string | Converted into an integer (200) | Converted into an integer (200)
+| `filter-unknown-field.json` | Extra `is_admin` field | `acc-001`, extra field is ignored (200) | `acc-001`, extra field is ignored (200)
 
 ## Each time, check
 
