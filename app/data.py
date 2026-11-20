@@ -49,9 +49,7 @@ ACCOUNTS: dict[str, dict] = {
 def get_account(account_id: str) -> dict | None:
     return ACCOUNTS.get(account_id)
 
-def find_accounts(*, owner_id: str | None = None, 
-                           account_type: str | None = None,
-                           min_balance_pence: int | None = None) -> list[dict]:
+def find_accounts(*, owner_id: str | None = None, account_type: str | None = None, min_balance_pence: int | None = None) -> list[dict]:
     results = []
     for account in ACCOUNTS.values():
         if owner_id is not None and account["owner_id"] != owner_id:
