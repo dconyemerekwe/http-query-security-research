@@ -8,23 +8,22 @@ class AccountFilter(BaseModel): # inherits BaseModel for data schema definition
     account_type: str | None = None
     min_balance_pence: int | None = None
 
-app = FastAPI()
+CurrentUser = Annotated[str, Depends(auth.get_current_user)] # Annotated[Type, metadata]
 
-def token(token: Annotated[str | None, Header()] = None):
-    return auth.get_current_user(token)
+app = FastAPI()
 
 @app.get("/health")
 def show_health():
     return {"status": "ok"}
 
 @app.api_route("/accounts", methods=["QUERY"])
-def query_accounts(f: Annotated[AccountFilter, Query(), Depends(token)]):
+def query_accounts(f: AccountFilter, current_user: CurrentUser): 
     return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)
 
 @app.get("/accounts")
-def get_accounts(f: Annotated[AccountFilter, Query(), Depends(token)]): # Annotated[Type, metadata -> coming from: URL's query string]
+def get_accounts(f: Annotated[AccountFilter, Query()], current_user: CurrentUser): 
     return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)
 
 @app.post("/accounts/search")
-def post_accounts(f: Annotated[AccountFilter, Query(), Depends(token)]):
+def post_accounts(f: AccountFilter, current_user: CurrentUser):
     return data.find_accounts(owner_id=f.owner_id, account_type=f.account_type, min_balance_pence=f.min_balance_pence)

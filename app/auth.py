@@ -2,7 +2,7 @@ from typing import Annotated
 from fastapi import HTTPException, Header
 
 class UnauthorizedException(HTTPException):
-    def __init__(self, detail: str = "Not authenticated"):
+    def __init__(self, detail: str = "Unauthorized"):
         super().__init__(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
 
 VALID_TOKENS: dict[str, str] = {
@@ -19,10 +19,11 @@ def get_current_user(authorization: Annotated[str | None, Header()] = None) -> s
     if not authorization.startswith("Bearer "):
         raise UnauthorizedException
 
+    token = authorization.removeprefix("Bearer ")
+
     # check 3: token isn't one we know
-    if authorization.removeprefix("Bearer: ") not in VALID_TOKENS:
+    if token not in VALID_TOKENS:
         raise UnauthorizedException
 
     # success
-    authorization.removeprefix("Bearer: ")
-    return VALID_TOKENS[authorization]
+    return VALID_TOKENS[token]
