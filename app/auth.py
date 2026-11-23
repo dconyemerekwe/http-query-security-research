@@ -2,6 +2,9 @@ from typing import Annotated
 from fastapi import HTTPException, Header
 
 class UnauthorizedException(HTTPException):
+    """
+    Security practice (CWE-204 mitigation): All 3 checks return identical failures, so callers can't distinguish between them
+    """
     def __init__(self, detail: str = "Unauthorized"):
         super().__init__(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
 
@@ -10,7 +13,7 @@ VALID_TOKENS: dict[str, str] = {
     "bob-test-token-2": "u-002"
     }
 
-def get_current_user(authorization: Annotated[str | None, Header()] = None) -> str:
+def get_current_user(authorization: Annotated[str | None, Header()] = None) -> str: # token travels in header not URL
     # check 1: no authorization header
     if authorization is None:
         raise UnauthorizedException
