@@ -120,7 +120,7 @@ Before authentication, any client could read any account through any method.
 ```
 
 **After authentication was implemented on all routes:**
- | **No token** | **Wrong token** | **Alice's token**
+ | No token | Wrong token | Alice's token
 |---|---|---|
 GET | 401 | 401 | 200 (`acc-001`, `acc-002`)
 POST | 401 | 200 (`acc-001`, `acc-002`)
@@ -128,7 +128,7 @@ QUERY | 401 | 200 (`acc-001`, `acc-002`)
 
 ### Observation 2: Authentication-only Enforcement Still Leaves BOLA
 
-**Request** (all routes) | **Result**
+Request (all routes) | Result
 |---|---|
 `/accounts?owner_id=u-002` + Alice's token | **200**: Bob's `acc-003`, `acc-004`, `acc-005`
 `/accounts?owner_id=u-002` + Alice's token | **405** with an `allow: QUERY`
@@ -139,3 +139,11 @@ QUERY | 401 | 200 (`acc-001`, `acc-002`)
 - Unauthenticated users can still discover that the route exists and which methods it accepts, because routing happens before the auth dependency runs.
 - The owner is chosen by a client-controlled filter, and the server never compares it with the authenticated identity.
 - Authentication answers who is asking. It doesn't decide what they may see (OWASP API1:2023).
+
+### Observation 3: BOLA Resolution with Object-level Ownership
+Request (Alice's token) | Result
+|---|---|
+`/accounts?owner_id=u-002` (all methods) | `200 []`
+No filters (all methods) | 200: `acc-001`, `acc-002`
+
+**The fix:** object-level ownership with an intersect implementation: the client's `owner_id` is treated as an ordinary filter combined with an enforced ownership condition, so responses always truthfully answer the request as sent and never contain another user's data. Done with a helper function, `search_owned_accounts`, that every route calls, taking the owner from the token and return `[]` when the client asks for a different owner.
