@@ -44,7 +44,7 @@
 
 ### Observation 2: QUERY keeps parameters out of the access log (same as POST)
 
-**Request:** `curl.exe` -i -X QUERY "http://127.0.0.1:8000/accounts" -H "Content-Type: application/json" --data "@requests/<file>.json"
+**Request:** `curl.exe -i -X QUERY "http://127.0.0.1:8000/accounts" -H "Content-Type: application/json" --data "@requests/<file>.json"`
 
 **Route behaviour:** Like POST, the QUERY route reads `AccountFilter` from the request body, never from the query string.
 
@@ -109,5 +109,41 @@ RFC 9110 defines **safe** as “doesn’t change server state”, and RFC 10008 
 - BOLA is overwhelmingly a **read** vulnerability: viewing other users’ records.
 - So QUERY needs exactly the same authorisation as GET.
 
-### Open items
-1. Test whether 405 is returned before authentication (Stage 4)
+### Observation 1: Inconsistent Authentication Across Methods
+
+Before authentication, any client could read any account through any method.
+
+**Evidence (protected GET, unprotected QUERY):**
+```
+  GET   /accounts?owner_id=u-002&account_type=current  401
+  QUERY /accounts?owner_id=u-002&account_type=current  200: Bob's acc-003, acc-005, IBANs
+```
+
+**After authentication was implemented on all routes:**
+ | No token | Wrong token | Alice's token
+|---|---|---|
+GET | 401 | 401 | 200 (`acc-001`, `acc-002`)
+POST | 401 | 200 (`acc-001`, `acc-002`)
+QUERY | 401 | 200 (`acc-001`, `acc-002`)
+
+### Observation 2: Authentication-only Enforcement Still Leaves BOLA
+
+Request (all routes) | Result
+|---|---|
+`/accounts?owner_id=u-002` + Alice's token | **200**: Bob's `acc-003`, `acc-004`, `acc-005`
+`/accounts?owner_id=u-002` + Alice's token | **405** with an `allow: QUERY`
+
+
+**Observation:** Authentication without object-level authoirsation.
+- Alice's identity was verified, yet she read another user's financial records.
+- Unauthenticated users can still discover that the route exists and which methods it accepts, because routing happens before the auth dependency runs.
+- The owner is chosen by a client-controlled filter, and the server never compares it with the authenticated identity.
+- Authentication answers who is asking. It doesn't decide what they may see (OWASP API1:2023).
+
+### Observation 3: BOLA Resolution with Object-level Ownership
+Request (Alice's token) | Result
+|---|---|
+`/accounts?owner_id=u-002` (all methods) | `200 []`
+No filters (all methods) | 200: `acc-001`, `acc-002`
+
+**The fix:** object-level ownership with an intersect implementation: the client's `owner_id` is treated as an ordinary filter combined with an enforced ownership condition, so responses always truthfully answer the request as sent and never contain another user's data. Done with a helper function, `search_owned_accounts`, that every route calls, taking the owner from the token and return `[]` when the client asks for a different owner.
