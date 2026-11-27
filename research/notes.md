@@ -147,3 +147,82 @@ Request (Alice's token) | Result
 No filters (all methods) | 200: `acc-001`, `acc-002`
 
 **The fix:** object-level ownership with an intersect implementation: the client's `owner_id` is treated as an ordinary filter combined with an enforced ownership condition, so responses always truthfully answer the request as sent and never contain another user's data. Done with a helper function, `search_owned_accounts`, that every route calls, taking the owner from the token and return `[]` when the client asks for a different owner.
+
+## Experiment 2: Cache Security
+
+Can incorrect QUERY cache implementation introduce cache confusion or cross-user information disclosure?
+
+RFC 10008 makes QUERY cacheable. Because every QUERY to the same resource shares one URI, a cache that keys on the URI alone (the default for GET-oriented caches) will serve one request's response to a different request — including a different user's.
+
+**Environment:** Docker Compose running Nginx 1.30.8 with Varnish 9.1 between it and the FastAPI/Uvicorn (Python 3.15.0, FastAPI 0.163.1, Uvicorn 0.54.0) app. 
+
+### Observation 1: Nginx cannot cache QUERY
+**Ran:** `proxy_cache_methods GET HEAD QUERY;` then `nginx -t` (Nginx 1.30.8)
+**Returned:** `nginx: [emerg] invalid value "QUERY" in ...nginx.conf:15`
+**Interpretation:** `proxy_cache_methods` only accepts GET, HEAD and POST, and the default cache key is URI-based. Consistent with RFC 10008, which forbids caches that cannot key on the request body from caching QUERY. Nginx fails safe: QUERY passes through uncached, and QUERY's cacheability benefit is unavailable. 
+
+### Observation 2: Naive "cache QUERY" rule - method rewritten, body dropped
+**Config (only change):**
+```vcl
+sub vcl_recv {
+    if (req.method == "QUERY") {
+        return (hash);
+    }
+}
+```
+**Ran:** Alice, `QUERY /accounts` + `filter-current.json` (`{"account_type": "current"}`), empty cache
+**Returned:** `200`, `X-Varnish: 2`, `Age: 0` (miss) — body contained `acc-001` **and** `acc-002` (filter ignored)
+**Evidence:**
+- Nginx log: `"QUERY /accounts HTTP/1.1" 200 283`
+- App log: `172.22.0.3:48180 - "GET /accounts HTTP/1.1" 200 OK`
+**Observation:** The client sent QUERY with a body; the app received GET with no body and no parameters.
+**Interpretation:** On a cache miss, Varnish fetched from the backend as GET and discarded the body — default behaviour designed for GET caching. The app answered the wrong question correctly. The cache corrupted the request before the application saw it.
+
+### Observation 3: Different bodies share one cache entry (cross-query false hit)
+**Ran:** Alice, `QUERY /accounts` + `filter-savings.json` (`{"account_type": "savings"}`), 55 s after Observation 3
+**Returned:** `200`, `X-Varnish: 5 3`, `Age: 54` (hit) — the same cached response as Observation 3
+**Evidence:** No new app log line; Nginx logged a second `QUERY /accounts`.
+**Interpretation:** The default cache key (URL + host) ignores the body. Every QUERY to `/accounts` maps to one entry, regardless of what was asked.
+
+### Observation 4: Bob receives Alice's accounts (cross-user disclosure)
+**Ran:** Bob (`bob-test-token-2`), `QUERY /accounts` + `filter-current.json`
+**Returned:** `200`, `X-Varnish: 32770 3`, `Age: 72` (hit) — **Alice's** `acc-001` and `acc-002`, including IBANs and balances
+**Evidence:** Nginx logged 3 QUERY requests in total; the app logged only 1 (Observation 3).
+**Interpretation:** Bob's request never reached the app, so the ownership check from Stage 4 never ran. Returning early from `vcl_recv` also skipped Varnish's built-in rule that refuses to cache requests carrying `Authorization`. Application-level authorisation does not protect data served by a cache in front of it.
+
+### Interpretation (Experiment 3 so far)
+- Both mainstream caches tested fail safe by default: neither caches QUERY.
+- The risk appears when a developer enables QUERY caching with a minimal rule. Every failure observed (method rewrite, body drop, URL-only key, skipped Authorization rule) is the cache's own default behaviour, designed for GET, where the URI identifies the response.
+- QUERY breaks that assumption: the URI no longer identifies the response, the body does. 
+
+### Observation 5: Corrected VCL config - no false hits, caching preserved
+**Config changes (vs. Observation 3):**
+- `vcl_recv`: `std.cache_req_body(100KB)` stores the body; if it can't be stored, `return (pass)` (fail safe, per RFC 10008). Original method saved in `X-Orig-Method` (client-supplied copies removed).
+- `vcl_hash`: key = method + `Content-Type` + `Authorization` + request body (`bodyaccess.hash_req_body()`) + URL + host.
+- `vcl_backend_fetch`: restores `bereq.method = "QUERY"` on misses, so the body is forwarded.
+
+**Ran:** same sequence as Observations 2-4, plus a repeat of Alice `current`, empty cache.
+**Returned:**
+| # | Request | X-Varnish / Age | Body |
+|---|---|---|---|
+| 1 | Alice, current | `2` / `0` (miss) | `acc-001` |
+| 2 | Alice, savings | `32770` / `0` (miss) | `acc-002` |
+| 3 | Bob, current | `5` / `0` (miss) | `acc-003`, `acc-005` |
+| 4 | Alice, current (repeat) | `8 3` / `14` (hit) | `acc-001` |
+
+**Evidence:** Nginx logged 4 `QUERY /accounts`; the app logged 3 `QUERY /accounts` (misses only, all as QUERY).
+**Interpretation:** Each failure from Observations 2-4 maps to one missing key component or fetch behaviour. With the body, request metadata and user identity in the key - and QUERY preserved on misses - Varnish caches QUERY safely: distinct queries and distinct users get distinct entries, and identical requests still hit.
+
+### Conclusion (Experiment 2)
+QUERY's cacheability is real but not automatic. Mainstream caches fail safe by default (Nginx cannot cache QUERY; Varnish does not by default). Enabling QUERY caching with a minimal rule produced request corruption (QUERY → GET, body dropped), cross-query false hits, and cross-user disclosure that bypassed application authorisation. A safe configuration must: store and forward the body, include body + method + content type in the key (RFC 10008), separate users (or not cache authenticated responses, RFC 9111), and refuse to cache when the body cannot be keyed.
+
+### Limitations
+- Keying on the raw `Authorization` header gives per-token entries: safe, but a new token means a cold cache.
+- Body hashing is byte-exact: semantically identical JSON with different whitespace or key order gets separate entries (false misses — a performance cost, not a security risk; RFC 10008 leaves normalisation optional).
+- Bodies over 100KB are not cached (deliberate fail-safe).
+- One cache product (Varnish 9.1) and one configuration style tested.
+
+**Reproducing:**
+- Naive config: commit `5b9a957` - `git show 5b9a957:docker/default.vcl`
+- Corrected config: commit `0e6c747`
+- Diff between them: `git diff 5b9a957 0e6c747 -- docker/default.vcl`
