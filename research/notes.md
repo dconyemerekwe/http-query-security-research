@@ -194,3 +194,30 @@ sub vcl_recv {
 - Both mainstream caches tested fail safe by default: neither caches QUERY.
 - The risk appears when a developer enables QUERY caching with a minimal rule. Every failure observed (method rewrite, body drop, URL-only key, skipped Authorization rule) is the cache's own default behaviour, designed for GET, where the URI identifies the response.
 - QUERY breaks that assumption: the URI no longer identifies the response, the body does. 
+
+### Observation 5: Corrected VCL config - no false hits, caching preserved
+**Config changes (vs. Observation 3):**
+- `vcl_recv`: `std.cache_req_body(100KB)` stores the body; if it can't be stored, `return (pass)` (fail safe, per RFC 10008). Original method saved in `X-Orig-Method` (client-supplied copies removed).
+- `vcl_hash`: key = method + `Content-Type` + `Authorization` + request body (`bodyaccess.hash_req_body()`) + URL + host.
+- `vcl_backend_fetch`: restores `bereq.method = "QUERY"` on misses, so the body is forwarded.
+
+**Ran:** same sequence as Observations 2-4, plus a repeat of Alice `current`, empty cache.
+**Returned:**
+| # | Request | X-Varnish / Age | Body |
+|---|---|---|---|
+| 1 | Alice, current | `2` / `0` (miss) | `acc-001` |
+| 2 | Alice, savings | `32770` / `0` (miss) | `acc-002` |
+| 3 | Bob, current | `5` / `0` (miss) | `acc-003`, `acc-005` |
+| 4 | Alice, current (repeat) | `8 3` / `14` (hit) | `acc-001` |
+
+**Evidence:** Nginx logged 4 `QUERY /accounts`; the app logged 3 `QUERY /accounts` (misses only, all as QUERY).
+**Interpretation:** Each failure from Observations 2-4 maps to one missing key component or fetch behaviour. With the body, request metadata and user identity in the key - and QUERY preserved on misses - Varnish caches QUERY safely: distinct queries and distinct users get distinct entries, and identical requests still hit.
+
+### Conclusion (Experiment 2)
+QUERY's cacheability is real but not automatic. Mainstream caches fail safe by default (Nginx cannot cache QUERY; Varnish does not by default). Enabling QUERY caching with a minimal rule produced request corruption (QUERY → GET, body dropped), cross-query false hits, and cross-user disclosure that bypassed application authorisation. A safe configuration must: store and forward the body, include body + method + content type in the key (RFC 10008), separate users (or not cache authenticated responses, RFC 9111), and refuse to cache when the body cannot be keyed.
+
+### Limitations
+- Keying on the raw `Authorization` header gives per-token entries: safe, but a new token means a cold cache.
+- Body hashing is byte-exact: semantically identical JSON with different whitespace or key order gets separate entries (false misses — a performance cost, not a security risk; RFC 10008 leaves normalisation optional).
+- Bodies over 100KB are not cached (deliberate fail-safe).
+- One cache product (Varnish 9.1) and one configuration style tested.
