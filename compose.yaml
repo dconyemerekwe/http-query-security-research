@@ -6,6 +6,13 @@ services:
     volumes:
       - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
+      - varnish
+
+  varnish:
+    image: varnish:9.1
+    volumes:
+      - ./docker/default.vcl:/etc/varnish/default.vcl:ro
+    depends_on:
       - app
 
   app:
