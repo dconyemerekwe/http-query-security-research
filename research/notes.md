@@ -221,3 +221,8 @@ QUERY's cacheability is real but not automatic. Mainstream caches fail safe by d
 - Body hashing is byte-exact: semantically identical JSON with different whitespace or key order gets separate entries (false misses — a performance cost, not a security risk; RFC 10008 leaves normalisation optional).
 - Bodies over 100KB are not cached (deliberate fail-safe).
 - One cache product (Varnish 9.1) and one configuration style tested.
+
+**Reproducing:**
+- Naive config: commit `5b9a957` - `git show 5b9a957:docker/default.vcl`
+- Corrected config: commit `0e6c747`
+- Diff between them: `git diff 5b9a957 0e6c747 -- docker/default.vcl`
