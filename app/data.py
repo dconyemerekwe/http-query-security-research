@@ -46,20 +46,30 @@ ACCOUNTS: dict[str, dict] = {
     },
 }
 
+
 def get_account(account_id: str) -> dict | None:
     return ACCOUNTS.get(account_id)
 
-def find_accounts(*, owner_id: str | None = None, account_type: str | None = None, min_balance_pence: int | None = None) -> list[dict]:
+
+def find_accounts(
+    *,
+    owner_id: str | None = None,
+    account_type: str | None = None,
+    min_balance_pence: int | None = None,
+) -> list[dict]:
     results = []
     for account in ACCOUNTS.values():
         if owner_id is not None and account["owner_id"] != owner_id:
             continue
-        if account_type is not None and account["account_type"] != account_type:
+        if (account_type is not None
+                and account["account_type"] != account_type):
             continue
-        if min_balance_pence is not None and account["balance_pence"] < min_balance_pence:
+        if (min_balance_pence is not None
+                and account["balance_pence"] < min_balance_pence):
             continue
         results.append(account)
     return results
+
 
 if __name__ == "__main__":
     print(get_account("acc-001"))
